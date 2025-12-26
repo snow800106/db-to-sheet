@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>DB 轉 Google Sheets</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont;
+      padding: 20px;
+      background: #f7f7f7;
+    }
+    h1 { font-size: 20px; }
+    input, button {
+      width: 100%;
+      margin-top: 12px;
+      padding: 12px;
+      font-size: 16px;
+    }
+    progress {
+      width: 100%;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>DB → Google Sheets 轉換工具</h1>
+
+<input type="file" id="dbFile" accept=".db">
+<button onclick="convert()">上傳並轉換</button>
+
+<progress id="progress" value="0" max="100" style="display:none"></progress>
+
+<script>
+function convert() {
+  const file = document.getElementById('dbFile').files[0];
+  if (!file) {
+    alert('請先選擇 db 檔');
+    return;
+  }
+
+  const progress = document.getElementById('progress');
+  progress.style.display = 'block';
+  progress.value = 30;
+
+  setTimeout(() => {
+    progress.value = 70;
+  }, 500);
+
+  setTimeout(() => {
+    progress.value = 100;
+    alert('轉換完成（示範版）\n實際資料可再接 Google Sheets API');
+  }, 1000);
+}
+</script>
+
+</body>
+</html>

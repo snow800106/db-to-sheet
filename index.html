@@ -1,59 +1,62 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8">
-  <title>DB 轉 Google Sheets</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont;
-      padding: 20px;
-      background: #f7f7f7;
-    }
-    h1 { font-size: 20px; }
-    input, button {
-      width: 100%;
-      margin-top: 12px;
-      padding: 12px;
-      font-size: 16px;
-    }
-    progress {
-      width: 100%;
-      margin-top: 12px;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KAFinance 轉檔工具</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/sql-wasm.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #f7f7f7; text-align: center; }
+        .card { background: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 400px; margin: auto; }
+        input, button { width: 100%; margin-top: 15px; padding: 12px; border-radius: 8px; border: 1px solid #ddd; box-sizing: border-box; }
+        button { background: #1a73e8; color: white; border: none; font-weight: bold; cursor: pointer; }
+        #status { margin-top: 15px; font-size: 14px; color: #666; white-space: pre-wrap; }
+    </style>
 </head>
 <body>
-
-<h1>DB → Google Sheets 轉換工具</h1>
-
-<input type="file" id="dbFile" accept=".db">
-<button onclick="convert()">上傳並轉換</button>
-
-<progress id="progress" value="0" max="100" style="display:none"></progress>
+    <div class="card">
+        <h1>📊 記帳轉檔工具</h1>
+        <input type="file" id="dbFile" accept=".db">
+        <button onclick="handleConvert()">執行轉換並下載 Excel</button>
+        <div id="status">請選取 kafinance_sync.db</div>
+    </div>
 
 <script>
-function convert() {
-  const file = document.getElementById('dbFile').files[0];
-  if (!file) {
-    alert('請先選擇 db 檔');
-    return;
-  }
+async function handleConvert() {
+    const fileInput = document.getElementById('dbFile');
+    const status = document.getElementById('status');
+    if (!fileInput.files[0]) { alert("請先選取檔案"); return; }
+    status.innerText = "⏳ 正在解析資料庫...";
 
-  const progress = document.getElementById('progress');
-  progress.style.display = 'block';
-  progress.value = 30;
+    try {
+        const fileReader = new FileReader();
+        fileReader.onload = async function() {
+            const SQL = await initSqlJs({ locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/${file}` });
+            const db = new SQL.Database(new Uint8Array(fileReader.result));
+            
+            // 自動搜尋包含記帳資料的表格
+            const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+            if (!tables[0]) throw new Error("資料庫內沒有表格");
+            
+            // 優先找尋有 'record' 或 'money' 字眼的表格，否則抓第一個
+            const allTables = tables[0].values.map(v => v[0]);
+            const targetTable = allTables.find(t => t.toLowerCase().includes('record') || t.toLowerCase().includes('money')) || allTables[0];
+            
+            const res = db.exec(`SELECT * FROM ${targetTable}`);
+            if (!res[0]) throw new Error("表格內無資料");
 
-  setTimeout(() => {
-    progress.value = 70;
-  }, 500);
+            const finalData = [res[0].columns, ...res[0].values];
+            const ws = XLSX.utils.aoa_to_sheet(finalData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Result");
 
-  setTimeout(() => {
-    progress.value = 100;
-    alert('轉換完成（示範版）\n實際資料可再接 Google Sheets API');
-  }, 1000);
+            XLSX.writeFile(wb, "KAFinance_Export.xlsx");
+            status.innerText = "✅ 轉換成功！已下載。";
+        };
+        fileReader.readAsArrayBuffer(fileInput.files[0]);
+    } catch (e) { status.innerText = "❌ 錯誤：" + e.message; }
 }
 </script>
-
 </body>
 </html>

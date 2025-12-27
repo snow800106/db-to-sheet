@@ -3,69 +3,65 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KA Finance 正確對齊版</title>
+    <title>KA Finance 極速轉檔</title>
     <script src="https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/sql-wasm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
-        body { font-family: -apple-system, sans-serif; background: #f0f4f8; padding: 20px; text-align: center; }
-        .card { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); max-width: 450px; margin: auto; }
-        .btn { background: #1a73e8; color: white; border: none; padding: 18px; width: 100%; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 20px; }
-        #status { margin-top: 20px; color: #555; font-size: 14px; white-space: pre-wrap; text-align: left; }
+        body { font-family: sans-serif; background: #f4f7f9; padding: 20px; text-align: center; }
+        .card { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 400px; margin: auto; }
+        .btn { background: #1a73e8; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 20px; }
+        #status { margin-top: 15px; color: #555; font-size: 14px; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>📊 KA Finance 專業轉檔</h2>
+        <h2>🚀 KA Finance 極速轉檔</h2>
         <input type="file" id="dbFile" accept=".db">
-        <button class="btn" onclick="handleConvert()">執行轉換 (對齊 Google Sheets)</button>
-        <div id="status">準備就緒，請選取您的 .db 檔案</div>
+        <button class="btn" onclick="fastConvert()">立即轉檔 (對齊範例格式)</button>
+        <div id="status">請選取檔案，1秒完成轉換</div>
     </div>
 
 <script>
-async function handleConvert() {
+async function fastConvert() {
     const fileInput = document.getElementById('dbFile');
     const status = document.getElementById('status');
-    if (!fileInput.files[0]) { alert("請先選取檔案"); return; }
-    status.innerText = "⏳ 正在解析您的 KA Finance 資料庫...";
+    if (!fileInput.files[0]) return;
+    
+    status.innerText = "⚡ 處理中...";
+    const reader = new FileReader();
+    reader.onload = async function() {
+        try {
+            const SQL = await initSqlJs({ locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/${f}` });
+            const db = new SQL.Database(new Uint8Array(reader.result));
 
-    try {
-        const fileReader = new FileReader();
-        fileReader.onload = async function() {
-            const SQL = await initSqlJs({ locateFile: file => `https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/${file}` });
-            const db = new SQL.Database(new Uint8Array(fileReader.result));
-
-            // 精確抓取您的資料：日期、項目內容(參考)、類別(交易分類)、金額、帳戶
-            [span_1](start_span)// 根據您的檔案結構[span_1](end_span) 對齊欄位
+            // 精確抓取流水帳：日期、參考(項目)、交易分類(類別)、金額、帳戶
             const res = db.exec("SELECT 日期, 參考, 交易分類, 金額, 帳戶 FROM records ORDER BY 日期 DESC");
             
-            if (!res[0]) {
-                // 如果 records 不對，嘗試抓取所有可能表格
-                status.innerText = "❌ 找不到 records 表格，請檢查 App 匯出的檔案。";
-                return;
-            }
+            if (!res[0]) throw new Error("找不到正確的記帳表格");
 
+            // 建立完全符合 Google Sheets 範例的格式
             const finalData = [["日期", "項目內容", "分類", "金額", "帳戶"]];
             res[0].values.forEach(row => {
                 finalData.push([
-                    row[0].split(' ')[0], // 只取日期部分 YYYY-MM-DD
-                    row[1] || "無備註",    // 項目內容
-                    row[2] || "未分類",    // 類別
-                    row[3],               // 金額
-                    row[4]                // 帳戶
+                    row[0].split(' ')[0], // 格式化日期：YYYY-MM-DD
+                    row[1] || "無內容", 
+                    row[2] || "未分類", 
+                    row[3] || 0, 
+                    row[4] || "預設帳戶"
                 ]);
             });
 
             const ws = XLSX.utils.aoa_to_sheet(finalData);
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "轉換結果");
-
-            XLSX.writeFile(wb, "KA_Finance_Fixed.xlsx");
-            status.innerText = `✅ 成功！已處理 ${res[0].values.length} 筆資料。`;
-        };
-        fileReader.readAsArrayBuffer(fileInput.files[0]);
-    } catch (e) {
-        status.innerText = "❌ 錯誤原因：" + e.message;
-    }
+            XLSX.utils.book_append_sheet(wb, ws, "Synced");
+            XLSX.writeFile(wb, "KA_Finance_Synced.xlsx");
+            
+            status.innerText = "✅ 轉換完成！共 " + res[0].values.length + " 筆資料。";
+        } catch (e) {
+            status.innerText = "❌ 錯誤：" + e.message;
+        }
+    };
+    reader.readAsArrayBuffer(fileInput.files[0]);
 }
 </script>
 </body>

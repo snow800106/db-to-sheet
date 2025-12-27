@@ -3,74 +3,95 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KA Finance 最終轉檔工具</title>
+    <title>KA Finance 自動修復轉檔</title>
     <script src="https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/sql-wasm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body { font-family: sans-serif; background: #f4f7f9; padding: 20px; text-align: center; }
         .card { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 450px; margin: auto; }
-        h2 { color: #1a73e8; margin-bottom: 20px; }
-        .btn { background: #1a73e8; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; transition: 0.3s; }
-        .btn:active { background: #174ea6; transform: scale(0.98); }
-        #status { margin-top: 15px; color: #555; font-size: 14px; white-space: pre-wrap; }
+        .btn { background: #1a73e8; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 20px; }
+        #status { margin-top: 15px; color: #d93025; font-size: 14px; white-space: pre-wrap; text-align: left; background: #fff5f5; padding: 10px; border-radius: 5px; display: none; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>📊 KA Finance 專業轉檔</h2>
-        <p style="color:#666; font-size:13px;">對齊格式：日期、項目內容、分類、金額、帳戶</p>
+        <h2>🚀 KA Finance 自動偵測轉檔</h2>
+        <p style="color:#666; font-size:13px;">自動適應新舊檔案格式</p>
         <input type="file" id="dbFile" accept=".db">
-        <button class="btn" onclick="processDB()">執行轉換並下載</button>
-        <div id="status">請選取您最新上傳的 .db 檔案</div>
+        <button class="btn" onclick="autoDetectConvert()">一鍵偵測並下載</button>
+        <div id="status"></div>
     </div>
 
 <script>
-async function processDB() {
+async function autoDetectConvert() {
     const fileInput = document.getElementById('dbFile');
     const status = document.getElementById('status');
     if (!fileInput.files[0]) { alert("請先選取檔案"); return; }
     
-    status.innerText = "⏳ 正在分析資料結構並提取數據...";
+    status.style.display = "block";
+    status.style.color = "#555";
+    status.innerText = "⏳ 正在掃描資料庫結構...";
 
     try {
         const fileReader = new FileReader();
         fileReader.onload = async function() {
-            try {
-                // 初始化解析引擎
-                const SQL = await initSqlJs({ locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/${f}` });
-                const db = new SQL.Database(new Uint8Array(fileReader.result));
+            const SQL = await initSqlJs({ locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/${f}` });
+            const db = new SQL.Database(new Uint8Array(fileReader.result));
 
-                // 根據您的檔案結構，精確抓取這五個欄位
-                // 參考 = 項目內容, 交易分類 = 分類
-                const res = db.exec("SELECT 日期, 參考, 交易分類, 金額, 帳戶 FROM records ORDER BY 日期 DESC");
-                
-                if (!res[0]) throw new Error("找不到記帳資料表格 records");
+            // 1. 取得所有表格
+            const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+            if (!tables[0]) throw new Error("資料庫內沒有任何表格");
+            const allTableNames = tables[0].values.map(v => v[0]);
 
-                const finalData = [["日期", "項目內容", "分類", "金額", "帳戶"]];
-                res[0].values.forEach(row => {
-                    finalData.push([
-                        row[0].split(' ')[0], // 格式化日期為 YYYY-MM-DD
-                        row[1] || "無備註",    // 項目內容
-                        row[2] || "未分類",    // 分類
-                        row[3],               // 金額
-                        row[4]                // 帳戶
-                    ]);
-                });
+            // 2. 自動尋找最像「流水帳」的表格
+            let targetTable = "";
+            let sqlQuery = "";
 
-                // 匯出 Excel
-                const ws = XLSX.utils.aoa_to_sheet(finalData);
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "Synced_Result");
-                XLSX.writeFile(wb, "KA_Finance_Final_Export.xlsx");
-                
-                status.innerText = `✅ 成功！已轉換 ${res[0].values.length} 筆資料。\n格式已完全對齊範例。`;
-            } catch (innerErr) {
-                status.innerText = "❌ 解析失敗：" + innerErr.message;
+            // 策略 A: 找尋包含中文欄位「日期」或「交易分類」的表
+            for (let name of allTableNames) {
+                const columns = db.exec(`PRAGMA table_info(${name})`)[0].values.map(v => v[1]);
+                if (columns.includes("日期") && columns.includes("金額")) {
+                    targetTable = name;
+                    // 根據您 Google Sheets 要求的順序抓取
+                    sqlQuery = `SELECT 日期, 參考, 交易分類, 金額, 帳戶 FROM ${name} ORDER BY 日期 DESC`;
+                    break;
+                }
+                // 策略 B: 備用方案 (針對英文版結構)
+                if (columns.includes("date") && columns.includes("amount")) {
+                    targetTable = name;
+                    sqlQuery = `SELECT date, description, category, amount, account FROM ${name} ORDER BY date DESC`;
+                    break;
+                }
             }
+
+            if (!targetTable) throw new Error("偵測不到記帳表格，找到的表格有: " + allTableNames.join(", "));
+
+            const res = db.exec(sqlQuery);
+            if (!res[0]) throw new Error(`表格 ${targetTable} 內沒有資料`);
+
+            const finalData = [["日期", "項目內容", "分類", "金額", "帳戶"]];
+            res[0].values.forEach(row => {
+                finalData.push([
+                    row[0].split(' ')[0], // 日期 YYYY-MM-DD
+                    row[1] || "",         // 項目
+                    row[2] || "",         // 分類
+                    row[3] || 0,          // 金額
+                    row[4] || ""          // 帳戶
+                ]);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(finalData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Synced");
+            XLSX.writeFile(wb, "KA_Finance_AutoFixed.xlsx");
+            
+            status.style.color = "#28a745";
+            status.innerText = `✅ 偵測成功！從表格「${targetTable}」抓取 ${res[0].values.length} 筆資料。`;
         };
         fileReader.readAsArrayBuffer(fileInput.files[0]);
     } catch (e) {
-        status.innerText = "❌ 系統錯誤：" + e.message;
+        status.style.color = "#d93025";
+        status.innerText = "❌ 偵測失敗：" + e.message;
     }
 }
 </script>

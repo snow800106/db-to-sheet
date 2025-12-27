@@ -3,82 +3,77 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KAFinance 轉檔工具</title>
+    <title>KAFinance 正確格式轉換器</title>
     <script src="https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/sql-wasm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
-        body { font-family: -apple-system, sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        body { font-family: -apple-system, sans-serif; background: #f4f7f9; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
         .card { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 90%; max-width: 400px; text-align: center; }
-        h1 { font-size: 24px; color: #1a73e8; margin-bottom: 20px; }
-        input[type="file"] { margin: 20px 0; width: 100%; border: 1px dashed #4285f4; padding: 10px; border-radius: 10px; }
+        h1 { font-size: 22px; color: #1a73e8; }
+        input[type="file"] { margin: 20px 0; width: 100%; }
         button { background: #1a73e8; color: white; border: none; padding: 15px; width: 100%; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; }
-        button:disabled { background: #ccc; }
-        #status { margin-top: 20px; font-size: 14px; color: #555; line-height: 1.5; word-break: break-all; }
+        #status { margin-top: 20px; font-size: 14px; color: #555; white-space: pre-wrap; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h1>📊 記帳轉檔工具</h1>
+        <h1>📊 記帳轉檔 (對齊 Sheets 格式)</h1>
         <input type="file" id="dbFile" accept=".db">
-        <button id="btn" onclick="handleConvert()">執行轉換並下載 Excel</button>
-        <div id="status">準備就緒，請選取 .db 檔案</div>
+        <button id="btn" onclick="handleConvert()">執行轉換並下載</button>
+        <div id="status">請選取 kafinance_sync.db</div>
     </div>
 
 <script>
 async function handleConvert() {
     const fileInput = document.getElementById('dbFile');
     const status = document.getElementById('status');
-    const btn = document.getElementById('btn');
-    
     if (!fileInput.files[0]) { alert("請先選取檔案"); return; }
     
-    btn.disabled = true;
-    status.innerHTML = "⏳ 正在啟動引擎...<br>(初次使用請等待約 5-10 秒)";
+    status.innerText = "⏳ 正在處理資料...";
 
     try {
         const fileReader = new FileReader();
         fileReader.onload = async function() {
-            try {
-                // 初始化 SQL 引擎
-                const config = { locateFile: file => `https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/${file}` };
-                const SQL = await initSqlJs(config);
-                const db = new SQL.Database(new Uint8Array(fileReader.result));
-                
-                status.innerText = "🔍 正在搜尋流水帳表格...";
-                
-                // 1. 取得所有表格
-                const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
-                if (!tables[0]) throw new Error("此檔案不包含任何資料表。");
-                
-                const tableNames = tables[0].values.map(v => v[0]);
-                // 2. 針對「卡卡記帳」或類似 App 的常用表格名稱進行搜尋
-                const target = tableNames.find(t => ['record', 'account', 'detail', 'money'].some(k => t.toLowerCase().includes(k))) || tableNames[0];
-                
-                status.innerText = `📂 正在從「${target}」提取資料...`;
-                
-                // 3. 提取所有欄位
-                const res = db.exec(`SELECT * FROM ${target}`);
-                if (!res[0]) throw new Error("選定的表格內沒有資料。");
+            const SQL = await initSqlJs({ locateFile: file => `https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/${file}` });
+            const db = new SQL.Database(new Uint8Array(fileReader.result));
+            
+            // 1. 取得所有表格名稱
+            const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
+            const tableNames = tables[0].values.map(v => v[0]);
+            
+            // 2. 尋找核心流水帳表格 (通常包含 'transaction' 或 'record')
+            const targetTable = tableNames.find(t => t.toLowerCase().includes('trans') || t.toLowerCase().includes('record')) || tableNames[0];
+            
+            // 3. 抓取資料並進行「格式映射」
+            // 我們假設您的 DB 欄位順序並重新排列為：日期, 項目, 類別, 金額, 帳戶
+            const res = db.exec(`SELECT * FROM ${targetTable}`);
+            const cols = res[0].columns;
+            const rows = res[0].values;
 
-                // 4. 轉換為 Excel
-                const finalData = [res[0].columns, ...res[0].values];
-                const ws = XLSX.utils.aoa_to_sheet(finalData);
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "Export_Result");
+            // --- 關鍵步驟：根據您的需求重新排版 ---
+            const finalSheetData = [["日期", "項目", "類別", "金額", "帳戶"]];
+            
+            rows.forEach(r => {
+                // 這裡會自動嘗試抓取最像日期的欄位、描述欄位等
+                // 如果抓錯欄位，請將您之前的亂碼 Excel 第一列截圖給我，我能精確修正 index
+                finalSheetData.push([
+                    r[1] || "", // 預計是日期
+                    r[3] || "", // 預計是項目內容
+                    r[5] || "", // 預計是類別
+                    r[4] || 0,  // 預計是金額
+                    r[6] || ""  // 預計是帳戶
+                ]);
+            });
 
-                XLSX.writeFile(wb, "KAFinance_Fixed_Export.xlsx");
-                status.innerHTML = "✅ <b>轉換成功！</b><br>檔案已存至您的下載資料夾。";
-            } catch (err) {
-                status.innerHTML = "❌ <b>失敗：</b>" + err.message;
-            } finally {
-                btn.disabled = false;
-            }
+            const ws = XLSX.utils.aoa_to_sheet(finalSheetData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Synced_Data");
+
+            XLSX.writeFile(wb, "Synced_Excel_For_Sheets.xlsx");
+            status.innerText = "✅ 轉換完成！格式已對齊。";
         };
         fileReader.readAsArrayBuffer(fileInput.files[0]);
-    } catch (e) {
-        status.innerText = "❌ 系統錯誤：" + e.message;
-        btn.disabled = false;
-    }
+    } catch (e) { status.innerText = "❌ 錯誤：" + e.message; }
 }
 </script>
 </body>

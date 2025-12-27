@@ -3,89 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KA Finance 表格偵測工具</title>
+    <title>KA Finance 最終轉檔工具</title>
     <script src="https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/sql-wasm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
-        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; text-align: center; }
+        body { font-family: sans-serif; background: #f4f7f9; padding: 20px; text-align: center; }
         .card { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 450px; margin: auto; }
-        button { background: #1a73e8; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 20px; }
-        #log { margin-top: 20px; text-align: left; font-size: 13px; color: #d93025; background: #fff5f5; padding: 10px; border-radius: 5px; display: none; white-space: pre-wrap; }
-        #success-info { margin-top: 20px; color: #28a745; font-weight: bold; display: none; }
+        h2 { color: #1a73e8; margin-bottom: 20px; }
+        .btn { background: #1a73e8; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        .btn:active { background: #174ea6; transform: scale(0.98); }
+        #status { margin-top: 15px; color: #555; font-size: 14px; white-space: pre-wrap; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>🔍 表格偵測與轉換</h2>
+        <h2>📊 KA Finance 專業轉檔</h2>
+        <p style="color:#666; font-size:13px;">對齊格式：日期、項目內容、分類、金額、帳戶</p>
         <input type="file" id="dbFile" accept=".db">
-        <button onclick="detectAndConvert()">偵測並轉檔</button>
-        <div id="success-info">✅ 轉換成功！已下載。</div>
-        <div id="log"></div>
+        <button class="btn" onclick="processDB()">執行轉換並下載</button>
+        <div id="status">請選取您最新上傳的 .db 檔案</div>
     </div>
 
 <script>
-async function detectAndConvert() {
+async function processDB() {
     const fileInput = document.getElementById('dbFile');
-    const log = document.getElementById('log');
-    const success = document.getElementById('success-info');
-    
+    const status = document.getElementById('status');
     if (!fileInput.files[0]) { alert("請先選取檔案"); return; }
     
-    log.style.display = "block";
-    log.innerText = "⏳ 正在分析資料庫結構...";
-    success.style.display = "none";
+    status.innerText = "⏳ 正在分析資料結構並提取數據...";
 
     try {
         const fileReader = new FileReader();
         fileReader.onload = async function() {
-            const SQL = await initSqlJs({ locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/${f}` });
-            const db = new SQL.Database(new Uint8Array(fileReader.result));
+            try {
+                // 初始化解析引擎
+                const SQL = await initSqlJs({ locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.6.2/dist/${f}` });
+                const db = new SQL.Database(new Uint8Array(fileReader.result));
 
-            // 1. 取得所有表格清單
-            const tableList = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
-            
-            if (!tableList[0]) {
-                log.innerText = "❌ 錯誤：這是一個空的資料庫，找不到任何表格。";
-                return;
+                // 根據您的檔案結構，精確抓取這五個欄位
+                // 參考 = 項目內容, 交易分類 = 分類
+                const res = db.exec("SELECT 日期, 參考, 交易分類, 金額, 帳戶 FROM records ORDER BY 日期 DESC");
+                
+                if (!res[0]) throw new Error("找不到記帳資料表格 records");
+
+                const finalData = [["日期", "項目內容", "分類", "金額", "帳戶"]];
+                res[0].values.forEach(row => {
+                    finalData.push([
+                        row[0].split(' ')[0], // 格式化日期為 YYYY-MM-DD
+                        row[1] || "無備註",    // 項目內容
+                        row[2] || "未分類",    // 分類
+                        row[3],               // 金額
+                        row[4]                // 帳戶
+                    ]);
+                });
+
+                // 匯出 Excel
+                const ws = XLSX.utils.aoa_to_sheet(finalData);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Synced_Result");
+                XLSX.writeFile(wb, "KA_Finance_Final_Export.xlsx");
+                
+                status.innerText = `✅ 成功！已轉換 ${res[0].values.length} 筆資料。\n格式已完全對齊範例。`;
+            } catch (innerErr) {
+                status.innerText = "❌ 解析失敗：" + innerErr.message;
             }
-
-            const names = tableList[0].values.map(v => v[0]);
-            log.innerText = "找到以下表格：\n" + names.join("\n") + "\n\n正在尋找記帳資料...";
-
-            // 2. 尋找包含最多欄位的表格（通常就是流水帳表）
-            let bestTable = "";
-            let maxCols = 0;
-            
-            for (let name of names) {
-                const info = db.exec(`PRAGMA table_info(${name})`);
-                if (info[0] && info[0].values.length > maxCols) {
-                    maxCols = info[0].values.length;
-                    bestTable = name;
-                }
-            }
-
-            log.innerText += `\n判定主表格為：${bestTable}\n正在對齊格式...`;
-
-            // 3. 抓取資料
-            const content = db.exec(`SELECT * FROM ${bestTable} LIMIT 5000`);
-            if (!content[0]) {
-                log.innerText += `\n❌ 錯誤：表格 ${bestTable} 是空的。`;
-                return;
-            }
-
-            // 4. 下載原始資料供檢查
-            const ws = XLSX.utils.aoa_to_sheet([content[0].columns, ...content[0].values]);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "RawData");
-            XLSX.writeFile(wb, "KA_Finance_Check.xlsx");
-
-            log.style.display = "none";
-            success.style.display = "block";
-            alert("已成功匯出原始資料！請檢查 Excel 內容。");
         };
         fileReader.readAsArrayBuffer(fileInput.files[0]);
     } catch (e) {
-        log.innerText = "❌ 發生錯誤：" + e.message;
+        status.innerText = "❌ 系統錯誤：" + e.message;
     }
 }
 </script>
